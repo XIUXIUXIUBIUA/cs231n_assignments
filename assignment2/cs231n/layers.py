@@ -734,8 +734,30 @@ def max_pool_backward_naive(dout, cache):
 
     # max 函数怎么微分？
     # 本质还是对dx的计算，只是现在需要的是max的那个数的dx，而不是全部的
-    
-
+    # dout (N,C,outH,outW)
+    (x,pool_param) = cache
+    (N,C,H,W) = x.shape
+    dx = np.zeros(x.shape)
+    pH = pool_param["pool_height"]
+    pW = pool_param["pool_width"]
+    S = pool_param["stride"]
+    outH = int((H-pH)/S + 1)
+    outW = int((W-pW)/S + 1)
+    for i in range(N):
+        # out_col = np.zeros((C,outH*outW))
+        dout_col = dout[i].reshape((C,outH*outW))
+        neuron = 0
+        for hi in range(0,H-pH+1,S):
+            for wi in range(0,W-pW+1,S):
+                pool_region = x[i,:,hi:hi+pH,wi:wi+pW].reshape(C,pH*pW)
+                max_pool_indices = pool_region.argmax(axis=1)
+                dmax_pool = np.zeros(pool_region.shape)
+                # np.arange(C)为什么不能直接用 : 代替？
+                # 因为是分层的，并不是把贯通C通道的都赋值，而是每层C有指定的位置赋值非零
+                # 用 : 会把所有C（不应当赋值的也操作了）都赋值
+                dmax_pool[np.arange(C),max_pool_indices] = dout_col[:,neuron]
+                dx[i,:,hi:hi+pH,wi:wi+pW] += dmax_pool.reshape((C,pH,pW))
+                neuron += 1
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -775,9 +797,15 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
-
+    # CNN的batch normalization是怎么操作的呢
+    # 对于(N,C,H,W)的输入，按channel C 归一化，每个channel有参数gamma 和 beta
+    # 对于输入的图，NHW的区域是由同一个卷积核滑动输出的，每层C各有一个卷积核
+    # 类比到全连接神经网络中，每层C所有NHW个元素通过同个卷积核输出，卷积核相当于神经元
+    # 所以NHW相当于一个神经元的特征列
+    (N,C,H,W) = x.shape
+    x = x.transpose(0,2,3,1).reshape(N*H*W, C)
+    out, cache = batchnorm_forward(x, gamma, beta, bn_param)
+    out = out.reshape(N, H, W, C).transpose(0,3,1,2)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -809,8 +837,10 @@ def spatial_batchnorm_backward(dout, cache):
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
+    (N,C,H,W) = dout.shape
+    dout_col = dout.transpose(0,2,3,1).reshape(N*H*W,C)
+    dx,dgamma,dbeta = batchnorm_backward_alt(dout_col, cache)
+    dx = dx.reshape(N,H,W,C).transpose(0,3,1,2)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
