@@ -56,6 +56,7 @@ class CaptioningRNN(object):
         self._end = word_to_idx.get("<END>", None)
 
         # Initialize word vectors
+        # word vectors 一开始是随机映射的
         self.params["W_embed"] = np.random.randn(vocab_size, wordvec_dim)
         self.params["W_embed"] /= 100
 
@@ -102,8 +103,8 @@ class CaptioningRNN(object):
         # by one relative to each other because the RNN should produce word (t+1)
         # after receiving word t. The first element of captions_in will be the START
         # token, and the first element of captions_out will be the first word.
-        captions_in = captions[:, :-1]
-        captions_out = captions[:, 1:]
+        captions_in = captions[:, :-1] # 这个是用来输入作为训练参量的
+        captions_out = captions[:, 1:] # 这个是ground truth
 
         # You'll need this
         mask = captions_out != self._null
@@ -151,8 +152,38 @@ class CaptioningRNN(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+		# (1)通过仿射变换将输入的image feature变换成shape符合隐藏层size的初始隐藏层输入
+		# input image feature (N,D) output hidden state (N,H)
+		affine_out,affine_cache = affine_forward(features,W_proj,b_proj)
 
+		# (2)将数据集自带的图片描述语句转换成词向量
+		# input captions_in (N,T) output word vectors (N,T,W)
+		word_embedding_out,word_embedding_cache = word_embedding_forward(captions_in,W_embed)
+
+		# (3)用RNN处理输入的词向量序列，初始隐藏状态是仿射后的image feature
+		# input word_embedding_out (N,T,W) affine_out (N,H)
+		rnn_or_lstm_out, rnn_cache = rnn_forward(word_embedding_out, affine_out, Wx, Wh, b)
+
+		# (4)将RNN每个时步的输出(N,T,D)通过temproal affine变换成每个单词的得分(N,T,V)
+		temporal_affine_out, temporal_affine_cache = temporal_affine_forward(rnn_or_lstm_out, W_vocab, b_vocab)
+
+		# (5)经过softmax计算预测损失
+		# dtemporal_affine_out shape(N,T,V)
+		loss,dtemporal_affine_out = temporal_softmax_loss(temporal_affine_out,captions_out,mask)
+
+		# 然后是反向传播，dx是包含了每个时步的hidden state输出的微分 
+		# ok, let's go continue
+		# (4) RNN将每个时步的输出转换成单词得分的线性网络的反向传播
+		drnn_or_lstm_out,grads["W_vocab"], grads["b_vocab"] = temporal_affine_backward(dtemporal_affine_out,temporal_affine_cache)
+
+		# (3) rnn的反向传播
+		dword_embedding_out,daffine_out,grads["Wx"],grads["Wh"],grads["b"] = rnn_backward(drnn_or_lstm_out,rnn_cache)
+
+		# (2) word_embedding的反向传播
+		grads["W_embed"] = word_embedding_backward(dword_embedding_out,word_embedding_cache)
+
+		# (1) image feature 仿射变换的反向传播
+		dfeatures,grads["W_proj"],grads["b_proj"] = affine_backward(daffine_out,affine_cache)
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -218,8 +249,24 @@ class CaptioningRNN(object):
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-        pass
+		# 计算隐藏层初始状态
+        affine_out,_ = affine_forward(features,W_proj,b_proj)
+        # 初始化caption每个样本的首个词为<start> shape (N,T)
+        captions[:,0] = self._start
+        #
+        prev_h = affine_out
+        prev_word_idx = [self._start]*N
+        for t in range(1,max_length):
+          # captions每个标量都表示一个词，转成词向量
+          # 转换成的词向量作为下一时步的输入x
+          words_vec = W_embed[prev_word_idx]
+          next_h,_ = rnn_step_forward(words_vec,prev_h,Wx,Wh,b)
+          prev_h = next_h
+          # 当前时步输出的next_h直接作为下一时步的prev_h
+          # 并且要用next_h计算当前时步输出的概率最大的词的下标
+          vocab_affine_out,_ = affine_forward(next_h,W_vocab,b_vocab)
+          captions[:,t] = list(np.argmax(vocab_affine_out,axis=1))
+          prev_word_idx = captions[:,t]
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################

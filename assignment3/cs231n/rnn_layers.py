@@ -36,8 +36,9 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    z = prev_h.dot(Wh) + x.dot(Wx) + b
+    next_h = np.tanh(z) # 隐藏层输出经过非线性激活函数
+    cache = (x,prev_h,Wh,Wx,b,next_h)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -69,7 +70,16 @@ def rnn_step_backward(dnext_h, cache):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    (x,prev_h,Wh,Wx,b,next_h) = cache
+    # 这里计算沿时间的反向传播
+    da = dnext_h * (1-next_h*next_h) # Loss对tanh的导数 shape(N,H)
+    # TODO: 怎么确定是prev_h还是da在前，两者形状一样？ 似乎结果是一样的？
+    dWh = prev_h.T.dot(da) # shape (H,H)
+    dWx = x.T.dot(da) # shape (D,H)
+    dx = da.dot(Wx.T) # shape (N,D)
+    db = np.sum(da,axis=0) # shape (H,)
+    dprev_h = da.dot(Wh.T) # shape (N,H) 转置for对应行列相乘
+
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -104,8 +114,17 @@ def rnn_forward(x, h0, Wx, Wh, b):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    # 这里不同的地方是说输入的x是T个时刻的，每个时刻都有x batch 输入
+    (N,T,D) = x.shape
+    (H,) = b.shape
+    h = np.zeros((N,T,H))
+    prev_h = h0
+    for t in range(T):
+        xt = x[:,t,:] # 取时刻t的输入x
+        next_h,_ = rnn_step_forward(xt, prev_h, Wx, Wh, b)
+        prev_h = next_h
+        h[:,t,:] = prev_h
+    cache = (x,h0,Wh,Wx,b,h)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -140,8 +159,31 @@ def rnn_backward(dh, cache):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    x, h0, Wh, Wx, b, h = cache
+    N, T, H = dh.shape
+    _, _, D = x.shape
+    next_h = h[:,T-1,:]
+    dprev_h = np.zeros((N, H))
+    dx = np.zeros((N, T, D))
+    dh0 = np.zeros((N, H))
+    dWx= np.zeros((D, H))
+    dWh = np.zeros((H, H))
+    db = np.zeros((H,))
+    # 这里的dh是什么呢？ remember it's not equal to dprev_h
+    for t in range(T):
+        t = T-1-t # 反向传播倒着开始
+        xt = x[:,t,:]
+        if(t==0):
+            prev_h = h0
+        else:
+            prev_h = h[:,t-1,:]
+        step_cache = (xt,prev_h,Wh,Wx,b,next_h)
+        dnext_h = dh[:,t,:] + dprev_h # 这里dh是loss对这个时刻的损失，没有沿时间累加
+        # 此时dprev_h是反向传播的前一级的输入，即这一级的输出，故叠加上来
+        dx[:,t,:],dprev_h,dWxt,dWht,dbt = rnn_step_backward(dnext_h,step_cache)
+        dWx, dWh, db = dWx+dWxt, dWh+dWht, db+dbt
+        next_h = prev_h
+    dh0 = dprev_h
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
     #                               END OF YOUR CODE                             #
@@ -171,8 +213,16 @@ def word_embedding_forward(x, W):
     # HINT: This can be done in one line using NumPy's array indexing.           #
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    pass
+    # 这里的word embedding 是什么个意思？
+    
+    (N,T) = x.shape
+    (V,D) = W.shape
+    out = np.zeros((N,T,D))
+    # 直接索引 W 矩阵完成映射
+    for i in range(N):
+        for j in range(T):
+            out[i,j] = W[x[i,j]]
+    cache = (x,W.shape)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -205,7 +255,10 @@ def word_embedding_backward(dout, cache):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x,W_shape = cache
+    dW = np.zeros(W_shape)
+    # TODO: 我也不懂这种怎么求导
+    np.add.at(dW,x,dout)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
